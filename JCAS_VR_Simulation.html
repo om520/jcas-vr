@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>JCAS 5G VR Simulation</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
+#canvas { display:block; width:100vw; height:100vh; }
+
+/* HUD overlay */
+#hud {
+  position:fixed; top:0; left:0; right:0;
+  pointer-events:none; z-index:10;
+  padding:1rem;
+  display:flex; justify-content:space-between; align-items:flex-start;
+}
+#title-block {
+  background:rgba(0,20,40,0.85);
+  border:1px solid rgba(0,201,255,0.4);
+  border-radius:0.5rem; padding:0.6rem 1rem;
+  backdrop-filter:blur(8px);
+}
+#title-block h1 { color:#00c9ff; font-size:1rem; letter-spacing:0.1em; }
+#title-block p  { color:#5a8aaa; font-size:0.65rem; margin-top:0.2rem; }
+
+#metrics {
+  display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:flex-end;
+}
+.metric-card {
+  background:rgba(0,20,40,0.85);
+  border:1px solid rgba(0,201,255,0.25);
+  border-radius:0.5rem; padding:0.5rem 0.8rem;
+  backdrop-filter:blur(8px); min-width:110px;
+  text-align:center;
+}
+.metric-card .val { font-size:1.1rem; font-weight:bold; }
+.metric-card .lbl { font-size:0.6rem; color:#5a8aaa; margin-top:0.15rem; }
+.av1 { color:#00c9ff; } .av2 { color:#ff6b35; } .av3 { color:#7fff00; }
+
+/* Bottom controls */
+#controls {
+  position:fixed; bottom:0; left:0; right:0;
+  display:flex; justify-content:center; align-items:center;
+  gap:0.8rem; padding:1rem;
+  background:linear-gradient(to top, rgba(0,10,20,0.9), transparent);
+  pointer-events:all; flex-wrap:wrap;
+}
+.btn {
+  background:rgba(0,30,60,0.9); border:1px solid rgba(0,201,255,0.4);
+  color:#00c9ff; padding:0.5rem 1.2rem; border-radius:2rem;
+  font-family:'Courier New',monospace; font-size:0.75rem;
+  cursor:pointer; transition:all 0.2s; letter-spacing:0.05em;
+}
+.btn:hover, .btn.active { background:rgba(0,201,255,0.15); border-color:#00c9ff; }
+.btn.danger { border-color:rgba(255,100,50,0.4); color:#ff6b35; }
+.btn.danger:hover { background:rgba(255,107,53,0.15); border-color:#ff6b35; }
+
+/* Info panel */
+#info-panel {
+  position:fixed; left:1rem; bottom:5rem;
+  background:rgba(0,15,30,0.9); border:1px solid rgba(0,201,255,0.2);
+  border-radius:0.5rem; padding:1rem; width:260px;
+  backdrop-filter:blur(8px); font-size:0.72rem; color:#8ab0d0;
+  display:none;
+}
+#info-panel h3 { color:#00c9ff; margin-bottom:0.5rem; font-size:0.8rem; }
+#info-panel .row { display:flex; justify-content:space-between; margin:0.25rem 0; }
+#info-panel .row .k { color:#5a8aaa; }
+#info-panel .row .v { color:#e0f0ff; font-weight:bold; }
+
+/* Mode label */
+#mode-label {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  color:rgba(0,201,255,0.6); font-size:0.7rem; letter-spacing:0.2em;
+  text-align:center; pointer-events:none; transition:opacity 0.5s;
+  text-transform:uppercase;
+}
+
+/* VR button */
+#vr-btn {
+  position:fixed; bottom:1rem; right:1rem;
+  background:rgba(0,201,255,0.1); border:2px solid #00c9ff;
+  color:#00c9ff; padding:0.7rem 1.5rem; border-radius:2rem;
+  font-family:'Courier New',monospace; font-size:0.8rem;
+  cursor:pointer; letter-spacing:0.1em;
+}
+#vr-btn:hover { background:rgba(0,201,255,0.2); }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="title-block">
+    <h1>JCAS 5G VR LAB</h1>
+    <p>Joint Communication &amp; Sensing · Real-time Resource Allocation</p>
+  </div>
+  <div id="metrics">
+    <div class="metric-card">
+      <div class="val av1" id="m-bw1">33%</div>
+      <div class="lbl">AV1 Bandwidth</div>
+    </div>
+    <div class="metric-card">
+      <div class="val av2" id="m-bw2">33%</div>
+      <div class="lbl">AV2 Bandwidth</div>
+    </div>
+    <div class="metric-card">
+      <div class="val av3" id="m-bw3">33%</div>
+      <div class="lbl">AV3 Bandwidth</div>
+    </div>
+    <div class="metric-card">
+      <div class="val" id="m-obj" style="color:#ffcc00">1.067</div>
+      <div class="lbl">Objective Score</div>
+    </div>
+    <div class="metric-card">
+      <div class="val" id="m-lat" style="color:#7fff00">--</div>
+      <div class="lbl">Avg Latency (ms)</div>
+    </div>
+    <div class="metric-card">
+      <div class="val" id="m-sens" style="color:#ff6b35">--</div>
+      <div class="lbl">Avg Sensing Err</div>
+    </div>
+  </div>
+</div>
+
+<!-- Info panel -->
+<div id="info-panel">
+  <h3 id="panel-title">AV Info</h3>
+  <div class="row"><span class="k">Bandwidth</span><span class="v" id="p-bw">--</span></div>
+  <div class="row"><span class="k">SINR</span><span class="v" id="p-sinr">--</span></div>
+  <div class="row"><span class="k">Sensing SNR</span><span class="v" id="p-gsnr">--</span></div>
+  <div class="row"><span class="k">Range Error ε</span><span class="v" id="p-eps">--</span></div>
+  <div class="row"><span class="k">TX Latency τ</span><span class="v" id="p-tau">--</span></div>
+  <div class="row"><span class="k">Safety Margin</span><span class="v" id="p-safe">--</span></div>
+  <div class="row"><span class="k">Speed</span><span class="v" id="p-spd">--</span></div>
+</div>
+
+<div id="mode-label" id="mode-lbl"></div>
+
+<!-- Controls -->
+<div id="controls">
+  <button class="btn active" onclick="setMode('equal')"     id="btn-equal">⚖ Equal Allocation</button>
+  <button class="btn"        onclick="setMode('optimized')" id="btn-opt">⚡ Optimized JCAS</button>
+  <button class="btn"        onclick="setMode('power')"     id="btn-pwr">🔋 High Power</button>
+  <button class="btn danger" onclick="setMode('starved')"   id="btn-starved">⚠ Resource Starved</button>
+  <button class="btn"        onclick="toggleCamera()"       id="btn-cam">🎥 Orbit View</button>
+  <button class="btn"        onclick="toggleInfo()"         id="btn-info">📊 Show Info</button>
+  <button class="btn"        onclick="togglePause()"        id="btn-pause">⏸ Pause</button>
+</div>
+
+<button id="vr-btn" onclick="enterVR()">🥽 ENTER VR</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────
+// SCENE SETUP
+// ─────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020810);
+scene.fog = new THREE.FogExp2(0x020810, 0.018);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.position.set(0, 18, 35);
+camera.lookAt(0, 0, 0);
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x112233, 0.8));
+const dirLight = new THREE.DirectionalLight(0x4488ff, 0.6);
+dirLight.position.set(10, 30, 10);
+dirLight.castShadow = true;
+scene.add(dirLight);
+
+// ─────────────────────────────────────────────────────────
+// GROUND — highway grid
+// ─────────────────────────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(120, 120, 40, 40);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x0a1520, wireframe: false,
+  roughness: 0.9, metalness: 0.1
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Grid lines
+const gridHelper = new THREE.GridHelper(120, 40, 0x0d2035, 0x0d2035);
+scene.add(gridHelper);
+
+// Road
+const roadGeo = new THREE.PlaneGeometry(12, 120);
+const roadMat = new THREE.MeshStandardMaterial({ color:0x111820, roughness:1 });
+const road = new THREE.Mesh(roadGeo, roadMat);
+road.rotation.x = -Math.PI/2;
+road.position.y = 0.01;
+scene.add(road);
+
+// Road markings
+for(let i=-5; i<=5; i++) {
+  const markGeo = new THREE.PlaneGeometry(0.3, 4);
+  const markMat = new THREE.MeshStandardMaterial({ color:0xffdd00, emissive:0x443300 });
+  const mark = new THREE.Mesh(markGeo, markMat);
+  mark.rotation.x = -Math.PI/2;
+  mark.position.set(0, 0.02, i*10);
+  scene.add(mark);
+}
+
+// ─────────────────────────────────────────────────────────
+// gNB TOWER
+// ─────────────────────────────────────────────────────────
+function makeTower() {
+  const g = new THREE.Group();
+
+  // Base
+  const baseGeo = new THREE.BoxGeometry(1.5,0.5,1.5);
+  const baseMat = new THREE.MeshStandardMaterial({color:0x223344, metalness:0.8, roughness:0.2});
+  g.add(new THREE.Mesh(baseGeo, baseMat));
+
+  // Pole
+  const poleGeo = new THREE.CylinderGeometry(0.12, 0.18, 14, 8);
+  const poleMat = new THREE.MeshStandardMaterial({color:0x334455, metalness:0.9, roughness:0.1});
+  const pole = new THREE.Mesh(poleGeo, poleMat);
+  pole.position.y = 7.25;
+  g.add(pole);
+
+  // Antenna array (4 elements)
+  for(let i=0;i<4;i++) {
+    const antGeo = new THREE.BoxGeometry(0.15, 1.2, 0.08);
+    const antMat = new THREE.MeshStandardMaterial({
+      color:0x00c9ff, emissive:0x003344, metalness:0.7, roughness:0.2
+    });
+    const ant = new THREE.Mesh(antGeo, antMat);
+    ant.position.set((i-1.5)*0.22, 14.2, 0);
+    g.add(ant);
+  }
+
+  // Top glow
+  const glowGeo = new THREE.SphereGeometry(0.25, 8, 8);
+  const glowMat = new THREE.MeshStandardMaterial({
+    color:0x00c9ff, emissive:0x00c9ff, emissiveIntensity:2,
+    transparent:true, opacity:0.8
+  });
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  glow.position.y = 15;
+  g.add(glow);
+
+  // Point light from top
+  const ptLight = new THREE.PointLight(0x00c9ff, 1.5, 30);
+  ptLight.position.y = 15;
+  g.add(ptLight);
+
+  g.position.set(-18, 0.25, 0);
+  return g;
+}
+const tower = makeTower();
+scene.add(tower);
+
+// ─────────────────────────────────────────────────────────
+// VEHICLES
+// ─────────────────────────────────────────────────────────
+const AV_COLORS = [0x00c9ff, 0xff6b35, 0x7fff00];
+const AV_SPEEDS = [15, 20, 12]; // m/s
+const AV_LANES  = [-3.5, 0, 3.5];
+const AV_START  = [10, 0, -15];
+
+function makeCar(colorHex, idx) {
+  const g = new THREE.Group();
+
+  // Body
+  const bodyGeo = new THREE.BoxGeometry(4, 1.2, 2);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: colorHex, metalness:0.7, roughness:0.2,
+    emissive: colorHex, emissiveIntensity:0.08
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 0.6;
+  body.castShadow = true;
+  g.add(body);
+
+  // Cabin
+  const cabinGeo = new THREE.BoxGeometry(2.2, 0.8, 1.7);
+  const cabinMat = new THREE.MeshStandardMaterial({ color:0x112233, metalness:0.5, roughness:0.3 });
+  const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+  cabin.position.set(-0.3, 1.6, 0);
+  g.add(cabin);
+
+  // Wheels (4)
+  [[1.5,-3],[1.5,3],[-1.5,-3],[-1.5,3]].forEach(([x,z]) => {
+    const wGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.3, 12);
+    const wMat = new THREE.MeshStandardMaterial({color:0x222222, metalness:0.5});
+    const w = new THREE.Mesh(wGeo, wMat);
+    w.rotation.z = Math.PI/2;
+    w.position.set(x*0.5, 0.35, z*0.3);
+    g.add(w);
+  });
+
+  // Label light
+  const labelLight = new THREE.PointLight(colorHex, 0.8, 12);
+  labelLight.position.y = 2;
+  g.add(labelLight);
+
+  // Sensor dome (JCAS)
+  const domeGeo = new THREE.SphereGeometry(0.25, 8, 6, 0, Math.PI*2, 0, Math.PI/2);
+  const domeMat = new THREE.MeshStandardMaterial({
+    color:0xffffff, emissive:colorHex, emissiveIntensity:0.5,
+    transparent:true, opacity:0.7, metalness:0.9
+  });
+  const dome = new THREE.Mesh(domeGeo, domeMat);
+  dome.position.set(1.5, 1.25, 0);
+  g.add(dome);
+
+  g.position.set(AV_START[idx], 0, AV_LANES[idx]);
+  return g;
+}
+
+const cars = AV_COLORS.map((c,i) => { const car = makeCar(c,i); scene.add(car); return car; });
+
+// ─────────────────────────────────────────────────────────
+// BEAM SYSTEM (communication + sensing)
+// ─────────────────────────────────────────────────────────
+const beams = [];
+const radarPulses = [];
+
+function makeBeam(colorHex, idx) {
+  const g = new THREE.Group();
+
+  // Comm beam (cone/cylinder)
+  const beamGeo = new THREE.CylinderGeometry(0.05, 0.4, 1, 8, 1, true);
+  const beamMat = new THREE.MeshStandardMaterial({
+    color: colorHex, transparent:true, opacity:0.35,
+    side: THREE.DoubleSide, emissive:colorHex, emissiveIntensity:0.5
+  });
+  const beam = new THREE.Mesh(beamGeo, beamMat);
+  g.add(beam);
+  g._mat = beamMat;
+  g._beam = beam;
+  g._color = colorHex;
+  scene.add(g);
+  return g;
+}
+
+const beamObjs = AV_COLORS.map((c,i) => makeBeam(c, i));
+
+function makeRadarPulse(colorHex) {
+  const geo = new THREE.RingGeometry(0.1, 0.3, 16);
+  const mat = new THREE.MeshBasicMaterial({
+    color: colorHex, transparent:true, opacity:0.7,
+    side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI/2;
+  mesh.visible = false;
+  scene.add(mesh);
+  return { mesh, mat, scale:0, active:false, color:colorHex };
+}
+
+const pulses = AV_COLORS.map(c => makeRadarPulse(c));
+
+// ─────────────────────────────────────────────────────────
+// FLOATING DATA PACKETS (comm visualization)
+// ─────────────────────────────────────────────────────────
+const packets = [];
+function spawnPacket(from, to, colorHex, bandwidth) {
+  const size = 0.1 + bandwidth * 0.3;
+  const geo = new THREE.BoxGeometry(size, size*0.6, size*0.4);
+  const mat = new THREE.MeshStandardMaterial({
+    color: colorHex, emissive:colorHex, emissiveIntensity:0.8,
+    transparent:true, opacity:0.9
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(from);
+  scene.add(mesh);
+  packets.push({ mesh, from:from.clone(), to:to.clone(), t:0, speed:0.015+bandwidth*0.02 });
+}
+
+// ─────────────────────────────────────────────────────────
+// RESOURCE ALLOCATION MODES
+// ─────────────────────────────────────────────────────────
+const MODES = {
+  equal: {
+    bw: [0.333, 0.333, 0.334],
+    sinr: [5.2, 4.8, 5.5],
+    gsnr: [10.1, 10.5, 9.8],
+    obj: 1.067,
+    label: '⚖ Equal Allocation (baseline)'
+  },
+  optimized: {
+    bw: [0.316, 0.383, 0.301],
+    sinr: [8.60, 6.71, 8.55],
+    gsnr: [14.01, 15.64, 12.87],
+    obj: 0.537,
+    label: '⚡ Optimized JCAS (49.6% better)'
+  },
+  power: {
+    bw: [0.30, 0.40, 0.30],
+    sinr: [12.1, 9.8, 11.7],
+    gsnr: [18.2, 20.1, 17.5],
+    obj: 0.31,
+    label: '🔋 High Power Mode'
+  },
+  starved: {
+    bw: [0.10, 0.80, 0.10],
+    sinr: [1.2, 8.5, 1.1],
+    gsnr: [3.2, 16.0, 2.8],
+    obj: 2.84,
+    label: '⚠ Resource Starved — AV1 & AV3 unsafe!'
+  }
+};
+
+let currentMode = 'equal';
+let paused = false;
+let showInfo = false;
+let orbitMode = false;
+let orbitAngle = 0;
+let t = 0;
+let slotTimer = 0;
+
+function setMode(m) {
+  currentMode = m;
+  ['equal','optimized','power','starved'].forEach(id => {
+    document.getElementById('btn-'+{equal:'equal',optimized:'opt',power:'pwr',starved:'starved'}[id])
+      ?.classList.toggle('active', id===m);
+  });
+  updateHUD();
+}
+
+// ─────────────────────────────────────────────────────────
+// PHYSICS HELPERS
+// ─────────────────────────────────────────────────────────
+function sensingError(gsnr_db) {
+  const c=3e8, B=20e6;
+  const gsnr = Math.pow(10, gsnr_db/10);
+  return (c / (4*Math.PI*B*Math.sqrt(gsnr))) * 100; // cm
+}
+
+function txLatency(bw, sinr_db) {
+  const sinr = Math.pow(10, sinr_db/10);
+  const Ts=1e-3, B=20e6;
+  const m = Ts * B * bw;
+  const V = 1 - Math.pow(1+sinr,-2);
+  const qinv = 4.265; // Q^-1(1e-5)
+  const rate = Math.max(0, Math.log2(1+sinr) - Math.sqrt(V/m)*qinv/Math.LN2);
+  const bits = m * rate;
+  return bits > 0 ? (500/bits)*1000 : 99; // ms
+}
+
+// ─────────────────────────────────────────────────────────
+// HUD UPDATE
+// ─────────────────────────────────────────────────────────
+function updateHUD() {
+  const md = MODES[currentMode];
+  let totalLat=0, totalSens=0;
+
+  md.bw.forEach((b,i) => {
+    const id = ['1','2','3'][i];
+    document.getElementById('m-bw'+id).textContent = Math.round(b*100)+'%';
+    totalLat  += txLatency(b, md.sinr[i]);
+    totalSens += sensingError(md.gsnr[i]);
+  });
+
+  document.getElementById('m-obj').textContent  = md.obj.toFixed(3);
+  document.getElementById('m-lat').textContent  = (totalLat/3).toFixed(3);
+  document.getElementById('m-sens').textContent = (totalSens/3).toFixed(1)+'cm';
+
+  const objEl = document.getElementById('m-obj');
+  objEl.style.color = md.obj < 0.6 ? '#7fff00' : md.obj < 1.0 ? '#ffcc00' : '#ff4444';
+}
+
+// ─────────────────────────────────────────────────────────
+// BEAM GEOMETRY UPDATE
+// ─────────────────────────────────────────────────────────
+function updateBeams() {
+  const md = MODES[currentMode];
+  const towerTop = new THREE.Vector3(-18, 14.5, 0);
+
+  beamObjs.forEach((bObj, i) => {
+    const car = cars[i];
+    const carPos = car.position.clone().add(new THREE.Vector3(0,1.2,0));
+    const dir = carPos.clone().sub(towerTop);
+    const len = dir.length();
+    const mid = towerTop.clone().add(dir.clone().multiplyScalar(0.5));
+
+    bObj.position.copy(mid);
+    bObj.lookAt(carPos);
+    bObj.rotateX(Math.PI/2);
+
+    // Scale by bandwidth
+    const bw = md.bw[i];
+    bObj._beam.scale.set(1 + bw*3, len, 1 + bw*3);
+
+    // Opacity by SINR
+    const sinr_norm = (md.sinr[i] - 1) / 15;
+    bObj._mat.opacity = 0.08 + sinr_norm * 0.35;
+    bObj._mat.emissiveIntensity = 0.2 + bw * 1.5;
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// CAR MOVEMENT
+// ─────────────────────────────────────────────────────────
+let carPositions = [10, 0, -15];
+
+function updateCars(dt) {
+  if(paused) return;
+  const md = MODES[currentMode];
+
+  carPositions.forEach((pos, i) => {
+    // Move cars along Z axis (road direction)
+    carPositions[i] = pos + AV_SPEEDS[i] * dt * 0.8;
+    if(carPositions[i] > 60) carPositions[i] = -60;
+
+    cars[i].position.x = carPositions[i];
+
+    // Bob slightly
+    cars[i].position.y = Math.sin(t*2 + i*2.1) * 0.04;
+
+    // Safety indicator — color tint if starved
+    const isSafe = md.sinr[i] > 3 && md.bw[i] > 0.15;
+    const bodyMesh = cars[i].children[0];
+    if(!isSafe) {
+      bodyMesh.material.emissiveIntensity = 0.3 + Math.sin(t*8)*0.3;
+    } else {
+      bodyMesh.material.emissiveIntensity = 0.08;
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// RADAR PULSES
+// ─────────────────────────────────────────────────────────
+let pulseTimer = 0;
+function updatePulses(dt) {
+  if(paused) return;
+  pulseTimer += dt;
+  const md = MODES[currentMode];
+
+  if(pulseTimer > 0.8) {
+    pulseTimer = 0;
+    pulses.forEach((p,i) => {
+      p.active = true;
+      p.scale = 0.1;
+      p.mesh.position.copy(cars[i].position);
+      p.mesh.position.y = 0.05;
+      p.mesh.visible = true;
+    });
+  }
+
+  pulses.forEach((p,i) => {
+    if(!p.active) return;
+    const md = MODES[currentMode];
+    const speed = 0.5 + md.gsnr[i]/20;
+    p.scale += dt * speed * 8;
+    p.mesh.scale.setScalar(p.scale);
+    p.mat.opacity = Math.max(0, 0.7 - p.scale/15);
+    if(p.scale > 15) { p.active=false; p.mesh.visible=false; }
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// PACKET SPAWNING
+// ─────────────────────────────────────────────────────────
+let packetTimer = 0;
+function updatePackets(dt) {
+  if(paused) return;
+  packetTimer += dt;
+  if(packetTimer > 0.4) {
+    packetTimer = 0;
+    const md = MODES[currentMode];
+    const i = Math.floor(Math.random()*3);
+    const towerPos = new THREE.Vector3(-18, 14.5, 0);
+    const carPos = cars[i].position.clone().add(new THREE.Vector3(0,1.5,0));
+    spawnPacket(towerPos, carPos, AV_COLORS[i], md.bw[i]);
+  }
+
+  // Update existing packets
+  for(let j=packets.length-1; j>=0; j--) {
+    const p = packets[j];
+    p.t += p.speed;
+    if(p.t >= 1) {
+      scene.remove(p.mesh);
+      packets.splice(j,1);
+      continue;
+    }
+    p.mesh.position.lerpVectors(p.from, p.to, p.t);
+    p.mesh.material.opacity = Math.sin(p.t * Math.PI) * 0.9;
+    p.mesh.rotation.y += 0.1;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// SLOT COUNTER (1ms TTI visualization)
+// ─────────────────────────────────────────────────────────
+let slotCount = 0;
+function updateSlot(dt) {
+  slotTimer += dt;
+  if(slotTimer > 0.5) { // visualize each 500ms as one "slot"
+    slotTimer = 0;
+    slotCount++;
+    updateHUD();
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// STARS / PARTICLES
+// ─────────────────────────────────────────────────────────
+const starGeo = new THREE.BufferGeometry();
+const starVerts = [];
+for(let i=0;i<800;i++) {
+  starVerts.push(
+    (Math.random()-0.5)*200,
+    Math.random()*80+5,
+    (Math.random()-0.5)*200
+  );
+}
+starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVerts,3));
+const starMat = new THREE.PointsMaterial({color:0x446688, size:0.15, transparent:true, opacity:0.6});
+scene.add(new THREE.Points(starGeo, starMat));
+
+// ─────────────────────────────────────────────────────────
+// ORBIT CAMERA
+// ─────────────────────────────────────────────────────────
+let isDragging=false, lastMX=0, lastMY=0;
+let camTheta=0.5, camPhi=0.5, camR=40;
+canvas.addEventListener('mousedown', e=>{isDragging=true; lastMX=e.clientX; lastMY=e.clientY;});
+canvas.addEventListener('mouseup', ()=>isDragging=false);
+canvas.addEventListener('mousemove', e=>{
+  if(!isDragging) return;
+  camTheta += (e.clientX-lastMX)*0.005;
+  camPhi   += (e.clientY-lastMY)*0.005;
+  camPhi = Math.max(0.1, Math.min(1.4, camPhi));
+  lastMX=e.clientX; lastMY=e.clientY;
+});
+canvas.addEventListener('wheel', e=>{
+  camR = Math.max(10, Math.min(80, camR+e.deltaY*0.05));
+});
+
+// Touch
+canvas.addEventListener('touchstart', e=>{
+  isDragging=true;
+  lastMX=e.touches[0].clientX; lastMY=e.touches[0].clientY;
+}, {passive:true});
+canvas.addEventListener('touchend', ()=>isDragging=false);
+canvas.addEventListener('touchmove', e=>{
+  if(!isDragging) return;
+  camTheta += (e.touches[0].clientX-lastMX)*0.005;
+  camPhi   += (e.touches[0].clientY-lastMY)*0.005;
+  camPhi = Math.max(0.1, Math.min(1.4, camPhi));
+  lastMX=e.touches[0].clientX; lastMY=e.touches[0].clientY;
+}, {passive:true});
+
+function updateCamera() {
+  if(orbitMode) {
+    orbitAngle += 0.003;
+    camera.position.set(
+      Math.sin(orbitAngle)*camR,
+      camR*0.5,
+      Math.cos(orbitAngle)*camR
+    );
+  } else {
+    camera.position.set(
+      Math.sin(camTheta)*Math.sin(camPhi)*camR,
+      Math.cos(camPhi)*camR,
+      Math.cos(camTheta)*Math.sin(camPhi)*camR
+    );
+  }
+  camera.lookAt(0, 3, 0);
+}
+
+// ─────────────────────────────────────────────────────────
+// UI HELPERS
+// ─────────────────────────────────────────────────────────
+function toggleCamera() {
+  orbitMode = !orbitMode;
+  document.getElementById('btn-cam').classList.toggle('active', orbitMode);
+}
+function toggleInfo() {
+  showInfo = !showInfo;
+  document.getElementById('info-panel').style.display = showInfo ? 'block' : 'none';
+  document.getElementById('btn-info').classList.toggle('active', showInfo);
+  if(showInfo) updateInfoPanel();
+}
+function togglePause() {
+  paused = !paused;
+  document.getElementById('btn-pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+  document.getElementById('btn-pause').classList.toggle('active', paused);
+}
+
+function updateInfoPanel() {
+  const md = MODES[currentMode];
+  const i = 0; // show AV1 stats
+  document.getElementById('panel-title').textContent = `Mode: ${md.label}`;
+  document.getElementById('p-bw').textContent   = Math.round(md.bw[i]*100)+'%';
+  document.getElementById('p-sinr').textContent = md.sinr[i].toFixed(1)+' dB';
+  document.getElementById('p-gsnr').textContent = md.gsnr[i].toFixed(1)+' dB';
+  document.getElementById('p-eps').textContent  = sensingError(md.gsnr[i]).toFixed(1)+' cm';
+  document.getElementById('p-tau').textContent  = txLatency(md.bw[i],md.sinr[i]).toFixed(4)+' ms';
+  const eps_m = sensingError(md.gsnr[i])/100;
+  const safe = 5.0 + 0.5 * eps_m;
+  document.getElementById('p-safe').textContent = safe.toFixed(2)+' m';
+  document.getElementById('p-spd').textContent  = AV_SPEEDS[i]+' m/s';
+}
+
+// ─────────────────────────────────────────────────────────
+// VR ENTRY
+// ─────────────────────────────────────────────────────────
+function enterVR() {
+  if(navigator.xr) {
+    navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+      if(supported) {
+        renderer.xr.setSession(null);
+        const btn = document.createElement('button');
+        document.body.appendChild(btn);
+        btn.click();
+        document.body.removeChild(btn);
+      } else {
+        alert('VR not supported on this device/browser.\n\nFor VR headsets:\n• Open this file in Firefox Reality or Wolvic\n• Or use Chrome on Android with a Cardboard headset\n\nThis simulation runs in full 3D on any screen!');
+      }
+    });
+  } else {
+    alert('WebXR not available.\n\nTo use VR:\n1. Open in a WebXR-compatible browser\n2. On Meta Quest: use the built-in browser\n3. On HTC Vive: use SteamVR + Chrome\n\nThe 3D simulation works on any screen by dragging to look around!');
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// RESIZE
+// ─────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ─────────────────────────────────────────────────────────
+// MAIN LOOP
+// ─────────────────────────────────────────────────────────
+let lastTime = performance.now();
+updateHUD();
+
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime)/1000, 0.05);
+  lastTime = now;
+  if(!paused) t += dt;
+
+  updateCamera();
+  updateCars(dt);
+  updateBeams();
+  updatePulses(dt);
+  updatePackets(dt);
+  updateSlot(dt);
+
+  // Tower glow pulse
+  tower.children[4].material.emissiveIntensity = 1.5 + Math.sin(t*3)*0.5;
+
+  // Star twinkle
+  starMat.opacity = 0.4 + Math.sin(t*0.5)*0.2;
+
+  if(showInfo) updateInfoPanel();
+
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
